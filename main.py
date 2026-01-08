@@ -1,260 +1,196 @@
-def get_n_substance(size):
-    maze_lvl = num_unlocked(Unlocks.Mazes)
-    if maze_lvl == 0:
-        return size
-    return size * (2 ** (maze_lvl - 1))
+dirs = [East, South, West, North]
+dirs_index = {East: 0, South: 1, West: 2, North: 3}
+MAX_PETALS = 15 
+MIN_PETALS = 7 
+WATER_LEVEL_TARGET = 0.40 
+BONE_GOAL = 100000 
 
-def solve_maze_step(current_dir):
-    if move(current_dir):
-        return current_dir
+def get_right_dir(dir):
+    return dirs[(dirs_index[dir] + 1) % 4]
+def get_left_dir(dir):
+    return dirs[(dirs_index[dir] - 1) % 4]
+
+def pass_args_to_function(function, arg1=None, arg2=None, arg3=None):
+    if not arg1:
+        def result_function(): function()
+    elif not arg2:
+        def result_function(): function(arg1)
+    elif not arg3:
+        def result_function(): function(arg1, arg2)
+    else:
+        def result_function(): function(arg1, arg2, arg3)
+    return result_function
+
+def goto_naive(x_target, y_target):
+    n = get_world_size()
+    curX, curY = get_pos_x(), get_pos_y()
     
-    dirs = [North, East, South, West]
-    idx = 0
-    for i in range(4):
-        if dirs[i] == current_dir:
-            idx = i
-            break
-            
-    for i in range(1, 4):
-        new_idx = (idx + i) % 4
-        new_dir = dirs[new_idx]
-        if move(new_dir):
-            return new_dir
-    return None
+    dx = (x_target - curX) % n
+    dirX = East if dx <= n // 2 else West
+    steps_x = dx if dx <= n // 2 else n - dx
 
-def check_afford(thing):
-    cost = get_cost(thing)
-    if cost is None:
-        return False
-    for itm, amt in cost.items():
-        if num_items(itm) < amt:
-            return False
-    return True
+    dy = (y_target - curY) % n
+    dirY = North if dy <= n // 2 else South
+    steps_y = dy if dy <= n // 2 else n - dy
+
+    while steps_x > 0 or steps_y > 0:
+        if steps_x >= steps_y and steps_x > 0:
+            move(dirX)
+            steps_x -= 1
+        elif steps_y > 0:
+            move(dirY)
+            steps_y -= 1
 
 def try_unlock():
     priority = [
-        Unlocks.Speed,
-        Unlocks.Multi_Trade,
-        Unlocks.Cactus,
-        Unlocks.Mazes,
-        Unlocks.Dinosaur,
-        Unlocks.Carrots,
-        Unlocks.Pumpkins,
-        Unlocks.Polyculture,
-        Unlocks.Expand,
-        Unlocks.Plant
+        Unlocks.Speed, Unlocks.Expand, Unlocks.Plant,
+        Unlocks.Carrots, Unlocks.Pumpkin, Unlocks.Polyculture,
+        Unlocks.Cactus, Unlocks.Dinosaur_Hat
     ]
     for u in priority:
-        if check_afford(u):
-            unlock(u)
-            return
+        unlock(u)
 
-def smart_trade(item, amount=10):
-    cost = get_cost(item)
-    if cost is None:
-        return
-    
-    needed = 0
-    pay_item = Items.Hay
-    
-    for k, v in cost.items():
-        pay_item = k
-        needed = v * amount
-        
-    if num_items(pay_item) > needed:
-        if num_unlocked(Unlocks.Multi_Trade):
-            trade(item, amount)
-        else:
-            for i in range(amount):
-                trade(item)
+def apply_water():
+    if get_water() < WATER_LEVEL_TARGET:
+        if num_items(Items.Water) > 0:
+            use_item(Items.Water)
 
-def manage_supplies():
-    try_unlock()
-    
-    seeds = [
-        Entities.Cactus, Entities.Sunflower, 
-        Entities.Carrots, Entities.Dinosaur, 
-        Entities.Bush, Entities.Tree, Entities.Pumpkin
-    ]
-    for s in seeds:
-        smart_trade(s, 50)
-        
-    if num_items(Items.Fertilizer) < 100:
-        smart_trade(Items.Fertilizer, 10)
-    if num_items(Items.Empty_Tank) < 10:
-        smart_trade(Items.Empty_Tank, 5)
-
-def boost_crop(entity, size):
-    if entity == Entities.Bush:
-        ws = num_items(Items.Weird_Substance)
-        req = get_n_substance(size)
-        if ws >= req:
-            use_item(Items.Weird_Substance, req)
-            return True
-            
-    if entity in [Entities.Sunflower, Entities.Dinosaur, Entities.Cactus, Entities.Pumpkin]:
+def boost_crop(entity):
+    if entity in [Entities.Sunflower, Entities.Pumpkin, Entities.Cactus]:
         if num_items(Items.Fertilizer) > 0:
-            use_item(Items.Fertilizer)
+            use_item(Items.Fertilizer) 
+            apply_water() 
+
+def dinosaur_safe_move(direction):
+    if can_move(direction):
+        move(direction)
+        return True
+    else:
+        change_hat(Hats.Carrot_Hat)
+        change_hat(Hats.Dinosaur_Hat)
+        return False
+        
+def dinosaur_mode():
+    change_hat(Hats.Dinosaur_Hat)
+    n = get_world_size()
+    
+    while num_items(Items.Bone) < BONE_GOAL:
+        for x in range(n):
+            target_y = n - 1 if x % 2 == 0 else 1
             
-    if get_water() < 0.6:
-        if num_items(Items.Water_Tank) > 0:
-            use_item(Items.Water_Tank)
-    return False
+            while get_pos_y() != target_y:
+                d = North if target_y > get_pos_y() else South
+                dinosaur_safe_move(d)
+
+            if x < n - 1:
+                dinosaur_safe_move(East)
+        
+        goto_naive(0, 0)
+        harvest()
+
+def sunflower_worker_task(petals_level, row_start, row_end):
+    n = get_world_size()
+    
+    for y in range(row_start, row_end):
+        goto_naive(0, y)
+        
+        is_row_ready = True
+        for x in range(n):
+            if get_entity_type() == Entities.Sunflower:
+                if measure() != petals_level:
+                    is_row_ready = False
+                    break 
+            
+            if x < n - 1: move(East)
+            
+        if is_row_ready:
+            goto_naive(0, y) 
+            harvest() 
+            plant(Entities.Sunflower) 
+            
+    return petals_level
+
+def plant_and_boost_unified(entity_to_plant):
+    if get_ground_type() == Grounds.Grassland:
+        till()
+        
+    if get_entity_type() != entity_to_plant:
+        if plant(entity_to_plant):
+             boost_crop(entity_to_plant)
+
+def farming_mode(current_mode):
+    world_size = get_world_size()
+    
+    for y in range(world_size):
+        for x in range(world_size):
+            
+            if can_harvest(): harvest()
+            apply_water()
+            
+            if current_mode == 3:
+                plant_and_boost_unified(Entities.Pumpkin)
+            
+            elif current_mode == 4:
+                plant_and_boost_unified(Entities.Cactus)
+            
+            elif current_mode == 5:
+                plant_and_boost_unified(Entities.Sunflower)
+                        
+            elif current_mode == 0:
+                if (get_pos_x() + get_pos_y()) % 2 == 0:
+                    plant_and_boost_unified(Entities.Tree)
+                else:
+                    plant_and_boost_unified(Entities.Bush)
+                
+            if x < world_size - 1: move(East)
+        
+        if y < world_size - 1: move(North)
+        
+    goto_naive(0, 0)
 
 def main():
-    world_size = get_world_size()
-    max_petals = 0
-    target_sun_x = 0
-    target_sun_y = 0
-    broken_cactus = False
     
-    tasks = dict()
+    mode = 0
+    dinosaur_enabled = False 
     
-    # 0=Farm, 1=PrepMaze, 2=RunMaze
-    mode = 0 
-    maze_dir = East
-
     while True:
-        cycle_broken_cactus = False
+        world_size = get_world_size()
         
-        if mode == 2:
-            current_type = get_entity_type()
-            if current_type == Entities.Treasure:
-                harvest()
-                mode = 0
-            elif current_type == Entities.Hedge:
-                next_d = solve_maze_step(maze_dir)
-                if next_d:
-                    maze_dir = next_d
-                else:
-                    mode = 0
-            else:
-                mode = 0
+        try_unlock()
+        
+        if num_unlocked(Hats.Dinosaur_Hat) > 0 and not dinosaur_enabled:
+            if num_items(Items.Egg) > 0:
+                mode = 6 
+                dinosaur_enabled = True
+        
+        if mode == 6:
+            dinosaur_mode() 
+            mode = 5 
             continue
-
-        for y in range(world_size):
-            for x in range(world_size):
-                
-                # SENSING
-                ent = get_entity_type()
-                
-                if ent == Entities.Sunflower:
-                    p = measure()
-                    if p > max_petals:
-                        max_petals = p
-                        target_sun_x = x
-                        target_sun_y = y
-                
-                if ent == Entities.Cactus:
-                    if x < world_size - 1:
-                        curr = measure()
-                        move(East)
-                        nei = measure()
-                        move(West)
-                        if curr > nei:
-                            swap(East)
-                            cycle_broken_cactus = True
-                
-                comp = get_companion()
-                if comp:
-                    tasks[(comp[1], comp[2])] = comp[0]
-                
-                # LOGIC EXECUTION
-                
-                # Task
-                if (x, y) in tasks:
-                    req = tasks.pop((x, y))
-                    if can_harvest(): harvest()
-                    if get_ground_type() == Grounds.Grassland: till()
-                    if plant(req):
-                        boost_crop(req, world_size)
-                    manage_supplies()
-                
-                # Hay (Critical)
-                elif num_items(Items.Hay) < 5000:
-                    if can_harvest(): harvest()
-                    if get_ground_type() == Grounds.Soil: till()
-                    plant(Entities.Grass)
-                
-                # Power (Critical)
-                elif num_items(Items.Power) < 5000:
-                    if ent == Entities.Sunflower and x == target_sun_x and y == target_sun_y:
-                        harvest()
-                        plant(Entities.Sunflower)
-                    elif ent != Entities.Sunflower:
-                        if can_harvest(): harvest()
-                        if get_ground_type() == Grounds.Grassland: till()
-                        plant(Entities.Sunflower)
-                        boost_crop(Entities.Sunflower, world_size)
-
-                # Maze Prep (Priority)
-                elif mode == 1:
-                    if ent != Entities.Bush:
-                        if can_harvest(): harvest()
-                        if get_ground_type() == Grounds.Soil: till()
-                        plant(Entities.Bush)
-                    if x == world_size - 1 and y == world_size - 1:
-                        if boost_crop(Entities.Bush, world_size):
-                            mode = 2
-                            maze_dir = East
-                            break 
-
-                # Wood
-                elif num_items(Items.Wood) < 10000 or num_items(Items.Weird_Substance) < get_n_substance(world_size):
-                    if can_harvest(): harvest()
-                    if (x + y) % 2 == 0:
-                        plant(Entities.Tree)
-                    else:
-                        if get_ground_type() == Grounds.Soil: till()
-                        plant(Entities.Bush)
-                        boost_crop(Entities.Bush, world_size)
-                
-                # Trigger Maze Phase
-                elif mode == 0 and num_items(Items.Gold) < 20000:
-                    req_ws = get_n_substance(world_size)
-                    if num_items(Items.Weird_Substance) >= req_ws:
-                        mode = 1
-                    else:
-                        # Fallback to filling weird substance logic (Wood block handles this)
-                        pass
-                
-                # Bones/Dino
-                elif num_items(Items.Bone) < 5000:
-                    if can_harvest(): harvest()
-                    if get_ground_type() == Grounds.Grassland: till()
-                    plant(Entities.Dinosaur)
-                    boost_crop(Entities.Dinosaur, world_size)
-
-                # Carrots
-                elif num_items(Items.Carrot) < 5000:
-                    if can_harvest(): harvest()
-                    if get_ground_type() == Grounds.Grassland: till()
-                    plant(Entities.Carrots)
-                
-                # Cactus (Default/Sort)
-                else:
-                    if ent == Entities.Cactus and not broken_cactus:
-                        harvest()
-                        plant(Entities.Cactus)
-                    elif ent != Entities.Cactus:
-                        if can_harvest(): harvest()
-                        if get_ground_type() == Grounds.Grassland: till()
-                        plant(Entities.Cactus)
-                        boost_crop(Entities.Cactus, world_size)
-
-                manage_supplies()
-
-                if mode != 2:
-                    if x == world_size - 1:
-                        move(North)
-                    else:
-                        move(East)
             
-            if mode == 2:
-                break
-
-            if y == 0:
-                broken_cactus = cycle_broken_cactus
-                if not broken_cactus:
-                    max_petals = 0
+        if mode == 5:
+            n = get_world_size()
+            row_division = n // 2 
+            
+            for p in range(MAX_PETALS, MIN_PETALS - 1, -1):
+                spawn_drone(pass_args_to_function(sunflower_worker_task, p, 0, row_division))
+                spawn_drone(pass_args_to_function(sunflower_worker_task, p, row_division, n))
+                
+            mode = 0
+            continue
+            
+        if mode in [0, 3, 4]:
+            
+            farming_mode(mode)
+            
+            if mode == 0: mode = 3 
+            elif mode == 3: mode = 4 
+            elif mode == 4: mode = 5 
+            
+            continue 
+            
+        else:
+            mode = 0
+            
+clear()
 main()
